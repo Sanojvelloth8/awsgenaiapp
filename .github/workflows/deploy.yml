@@ -36,7 +36,8 @@ jobs:
 
       - name: Terraform Init
         working-directory: terraform
-        run: terraform init
+        run: terraform init -reconfigure
+        run: terraform force-unlock -force 5ec44b7e-2df0-dc5a-0f06-54cdd5311ce9
 
       - name: Terraform Apply
         working-directory: terraform
