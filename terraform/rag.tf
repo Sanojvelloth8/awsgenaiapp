@@ -107,14 +107,19 @@ resource "null_resource" "create_index" {
     aws_opensearchserverless_access_policy.data
   ]
 
+  triggers = {
+    collection_endpoint = aws_opensearchserverless_collection.main.collection_endpoint
+    index_name          = "default-index"
+  }
+
   provisioner "local-exec" {
-    command = "pip3 install opensearch-py requests-aws4auth -q && python3 create_index.py ${aws_opensearchserverless_collection.main.collection_endpoint} default-index ${var.aws_region}"
+    command     = "sleep 30 && pip3 install opensearch-py requests-aws4auth -q && python3 create_index.py ${aws_opensearchserverless_collection.main.collection_endpoint} default-index ${var.aws_region} || (echo 'Index creation failed' && exit 1)"
     working_dir = path.module
   }
 }
 
 resource "aws_bedrockagent_knowledge_base" "main" {
-  name     = "${var.project_name}-${var.environment}-kb"
+  name     = "${var.project_name}-${var.environment}-kb-v2"
   role_arn = aws_iam_role.bedrock_kb.arn
 
   knowledge_base_configuration {
