@@ -1,0 +1,107 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  PROJECT_NAME: genapp
+  ENVIRONMENT: dev
+
+jobs:
+  deploy:
+    name: Deploy to AWS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform
+        run: terraform apply -auto-approve
+
+      - name: Get Terraform Outputs
+        id: tf-outputs
+        working-directory: terraform
+        run: |
+          echo "backend_repo=$(terraform output -raw backend_repo_url)" >> $GITHUB_OUTPUT
+          echo "frontend_repo=$(terraform output -raw frontend_repo_url)" >> $GITHUB_OUTPUT
+          echo "cognito_pool_id=$(terraform output -raw cognito_user_pool_id)" >> $GITHUB_OUTPUT
+          echo "alb_dns=$(terraform output -raw alb_dns_name)" >> $GITHUB_OUTPUT
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and Push Backend Image
+        working-directory: backend
+        run: |
+          docker build -t ${{ steps.tf-outputs.outputs.backend_repo }}:latest .
+          docker push ${{ steps.tf-outputs.outputs.backend_repo }}:latest
+
+      - name: Build and Push Frontend Image
+        working-directory: frontend
+        run: |
+          docker build -t ${{ steps.tf-outputs.outputs.frontend_repo }}:latest .
+          docker push ${{ steps.tf-outputs.outputs.frontend_repo }}:latest
+
+      - name: Force ECS Service Update
+        run: |
+          aws ecs update-service \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --service ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-backend \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+          
+          aws ecs update-service \
+            --cluster ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-cluster \
+            --service ${{ env.PROJECT_NAME }}-${{ env.ENVIRONMENT }}-frontend \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Create Test User
+        continue-on-error: true
+        run: |
+          aws cognito-idp admin-create-user \
+            --user-pool-id ${{ steps.tf-outputs.outputs.cognito_pool_id }} \
+            --username testuser \
+            --temporary-password TempPass123! \
+            --region ${{ env.AWS_REGION }} || true
+          
+          aws cognito-idp admin-set-user-password \
+            --user-pool-id ${{ steps.tf-outputs.outputs.cognito_pool_id }} \
+            --username testuser \
+            --password TestPass123! \
+            --permanent \
+            --region ${{ env.AWS_REGION }} || true
+
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Application URL:** http://${{ steps.tf-outputs.outputs.alb_dns }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test Credentials:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Username: \`testuser\`" >> $GITHUB_STEP_SUMMARY
+          echo "- Password: \`TestPass123!\`" >> $GITHUB_STEP_SUMMARY
