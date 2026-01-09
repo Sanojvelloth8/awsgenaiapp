@@ -20,7 +20,7 @@ KB_BUCKET_NAME = os.environ.get("KB_BUCKET_NAME")
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE")
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID")
 COGNITO_CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID")
-MODEL_ID = "us.anthropic.claude-3-5-haiku-20241022-v1:0"
+MODEL_ID = "us.anthropic.claude-3-haiku-20240307-v1:0"
 RELEVANCE_THRESHOLD = 0.3
 HISTORY_LIMIT = 6  # Keep last 6 messages (3 turns) for context
 
