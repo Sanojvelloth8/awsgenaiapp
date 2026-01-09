@@ -114,7 +114,7 @@ resource "null_resource" "create_index" {
 }
 
 resource "aws_bedrockagent_knowledge_base" "main" {
-  name     = "${var.project_name}-${var.environment}-kb"
+  name     = "${var.project_name}-${var.environment}-kb-v2"
   role_arn = aws_iam_role.bedrock_kb.arn
 
   knowledge_base_configuration {
