@@ -20,7 +20,7 @@ KB_BUCKET_NAME = os.environ.get("KB_BUCKET_NAME")
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE")
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID")
 COGNITO_CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID")
-MODEL_ID = "amazon.titan-text-express-v1"
+MODEL_ID = "anthropic.claude-3-5-haiku-20241022-v1:0"
 RELEVANCE_THRESHOLD = 0.3
 HISTORY_LIMIT = 6  # Keep last 6 messages (3 turns) for context
 
@@ -176,14 +176,17 @@ User: {req.query}
 Answer using your general knowledge:"""
             sources = []
 
-        # Generate response with Titan
+        # Generate response with Claude (using Messages API format)
         body = json.dumps({
-            "inputText": prompt,
-            "textGenerationConfig": {
-                "maxTokenCount": 2000,
-                "temperature": 0.7,
-                "topP": 0.95
-            }
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 2000,
+            "temperature": 0.7,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
         })
 
         response = bedrock_runtime.invoke_model(
@@ -194,7 +197,7 @@ Answer using your general knowledge:"""
         )
         
         response_body = json.loads(response["body"].read())
-        answer = response_body["results"][0]["outputText"].strip()
+        answer = response_body["content"][0]["text"].strip()
 
     except Exception as e:
         raise HTTPException(500, f"Bedrock error: {str(e)}")
