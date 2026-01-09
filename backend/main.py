@@ -1,4 +1,4 @@
-# backend
+# backend application
 
 import os
 import time
