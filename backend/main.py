@@ -20,7 +20,7 @@ KB_BUCKET_NAME = os.environ.get("KB_BUCKET_NAME")
 DYNAMODB_TABLE = os.environ.get("DYNAMODB_TABLE")
 COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID")
 COGNITO_CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID")
-MODEL_ID = "us.anthropic.claude-3-haiku-20240307-v1:0"
+MODEL_ID = "amazon.nova-2-lite-v1:0"
 RELEVANCE_THRESHOLD = 0.3
 HISTORY_LIMIT = 6  # Keep last 6 messages (3 turns) for context
 
@@ -176,28 +176,23 @@ User: {req.query}
 Answer using your general knowledge:"""
             sources = []
 
-        # Generate response with Claude (using Messages API format)
-        body = json.dumps({
-            "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": 2000,
-            "temperature": 0.7,
-            "messages": [
+
+        # Generate response with Amazon Nova (using Converse API)
+        response = bedrock_runtime.converse(
+            modelId=MODEL_ID,
+            messages=[
                 {
                     "role": "user",
-                    "content": prompt
+                    "content": [{"text": prompt}]
                 }
-            ]
-        })
-
-        response = bedrock_runtime.invoke_model(
-            modelId=MODEL_ID,
-            body=body,
-            contentType="application/json",
-            accept="application/json"
+            ],
+            inferenceConfig={
+                "maxTokens": 2000,
+                "temperature": 0.7
+            }
         )
         
-        response_body = json.loads(response["body"].read())
-        answer = response_body["content"][0]["text"].strip()
+        answer = response["output"]["message"]["content"][0]["text"].strip()
 
     except Exception as e:
         raise HTTPException(500, f"Bedrock error: {str(e)}")
