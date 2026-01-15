@@ -1,4 +1,4 @@
-# frontend application
+# frontend
 
 import streamlit as st
 import requests
