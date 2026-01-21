@@ -2,7 +2,7 @@
 
 A serverless Retrieval-Augmented Generation (RAG) application built on AWS, designed to perform semantic search and Q&A over private documentation.
 
-![Architecture Diagram](https://github.com/Sanojvelloth8/awsgenaiapp/blob/main/docs/design-document.md)
+![Architecture Diagram](./docs/architecture_diagram.png)
 
 ## 🚀 Features
 
