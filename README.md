@@ -1,6 +1,6 @@
 # AWS GenAI RAG Application
 
-A serverless Retrieval-Augmented Generation (RAG) application built on AWS, designed to perform semantic search and Q&A over private documentation.
+A serverless Retrieval-Augmented Generation (RAG) application built on AWS, designed to perform semantic search and Q&A over private documentation
 
 ![Architecture Diagram](./docs/architecture_diagram.png)
 
