@@ -1,6 +1,6 @@
 # AWS GenAI RAG Application
 
-A serverless Retrieval-Augmented Generation (RAG) application built on AWS, designed to perform semantic search and Q&A over private documentation
+A serverless Retrieval-Augmented Generation (RAG) application built on AWS, designed to perform semantic search and Q&A over private documentation.
 
 ![Architecture Diagram](./docs/architecture_diagram.png)
 
@@ -8,8 +8,8 @@ A serverless Retrieval-Augmented Generation (RAG) application built on AWS, desi
 
 - **Hybrid RAG**: Combines document context with general knowledge using AWS Bedrock (Titan models).
 - **Serverless Architecture**:
-    - **Frontend**: Streamlit running on ECS Fargate.
-    - **Backend**: FastAPI running on ECS Fargate.
+    - **Frontend**: Streamlit running on ECS Fargate
+    - **Backend**: FastAPI running on ECS Fargate
     - **Vector Store**: OpenSearch Serverless.
     - **Auth**: Amazon Cognito (JWT).
 - **Infrastructure as Code**: 100% Terraform managed.
