@@ -1,7 +1,8 @@
-# S3 Bucket for Documents
+# ── S3 Bucket ──────────────────────────────────────────────────────────────
 resource "aws_s3_bucket" "docs" {
   bucket_prefix = "${var.project_name}-${var.environment}-docs-"
   force_destroy = true
+  tags          = { Name = "${var.project_name}-${var.environment}-docs" }
 }
 
 resource "aws_s3_bucket_public_access_block" "docs" {
@@ -12,12 +13,31 @@ resource "aws_s3_bucket_public_access_block" "docs" {
   restrict_public_buckets = true
 }
 
-# OpenSearch Serverless
+resource "aws_s3_bucket_versioning" "docs" {
+  bucket = aws_s3_bucket.docs.id
+  versioning_configuration { status = "Enabled" }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "docs" {
+  bucket = aws_s3_bucket.docs.id
+
+  rule {
+    id     = "outputs-cleanup"
+    status = "Enabled"
+    filter { prefix = "outputs/" }
+    expiration { days = 30 }
+  }
+}
+
+# ── OpenSearch Serverless ──────────────────────────────────────────────────
 resource "aws_opensearchserverless_security_policy" "enc" {
   name = "${var.project_name}-${var.environment}-enc"
   type = "encryption"
   policy = jsonencode({
-    Rules = [{ ResourceType = "collection", Resource = ["collection/${var.project_name}-${var.environment}-vec"] }]
+    Rules = [{
+      ResourceType = "collection"
+      Resource     = ["collection/${var.project_name}-${var.environment}-vec"]
+    }]
     AWSOwnedKey = true
   })
 }
@@ -27,24 +47,42 @@ resource "aws_opensearchserverless_security_policy" "net" {
   type = "network"
   policy = jsonencode([{
     Rules = [
-      { ResourceType = "collection", Resource = ["collection/${var.project_name}-${var.environment}-vec"] },
-      { ResourceType = "dashboard", Resource = ["collection/${var.project_name}-${var.environment}-vec"] }
+      {
+        ResourceType = "collection"
+        Resource     = ["collection/${var.project_name}-${var.environment}-vec"]
+      },
+      {
+        ResourceType = "dashboard"
+        Resource     = ["collection/${var.project_name}-${var.environment}-vec"]
+      }
     ]
     AllowFromPublic = true
   }])
 }
-
-data "aws_caller_identity" "current" {}
 
 resource "aws_opensearchserverless_access_policy" "data" {
   name = "${var.project_name}-${var.environment}-access"
   type = "data"
   policy = jsonencode([{
     Rules = [
-      { ResourceType = "collection", Resource = ["collection/${var.project_name}-${var.environment}-vec"], Permission = ["aoss:CreateCollectionItems", "aoss:DeleteCollectionItems", "aoss:UpdateCollectionItems", "aoss:DescribeCollectionItems"] },
-      { ResourceType = "index", Resource = ["index/${var.project_name}-${var.environment}-vec/*"], Permission = ["aoss:CreateIndex", "aoss:DeleteIndex", "aoss:UpdateIndex", "aoss:DescribeIndex", "aoss:ReadDocument", "aoss:WriteDocument"] }
+      {
+        ResourceType = "collection"
+        Resource     = ["collection/${var.project_name}-${var.environment}-vec"]
+        Permission   = ["aoss:CreateCollectionItems", "aoss:DeleteCollectionItems",
+          "aoss:UpdateCollectionItems", "aoss:DescribeCollectionItems"]
+      },
+      {
+        ResourceType = "index"
+        Resource     = ["index/${var.project_name}-${var.environment}-vec/*"]
+        Permission   = ["aoss:CreateIndex", "aoss:DeleteIndex", "aoss:UpdateIndex",
+          "aoss:DescribeIndex", "aoss:ReadDocument", "aoss:WriteDocument"]
+      }
     ]
-    Principal = [data.aws_caller_identity.current.arn, aws_iam_role.bedrock_kb.arn]
+    Principal = [
+      data.aws_caller_identity.current.arn,
+      aws_iam_role.bedrock_kb.arn,
+      aws_iam_role.task.arn,
+    ]
   }])
 }
 
@@ -53,20 +91,25 @@ resource "aws_opensearchserverless_collection" "main" {
   type             = "VECTORSEARCH"
   standby_replicas = "DISABLED"
   depends_on       = [aws_opensearchserverless_security_policy.enc]
+  tags             = { Name = "${var.project_name}-${var.environment}-vec" }
 }
 
-# Bedrock KB Role
+# ── Bedrock KB IAM Role ────────────────────────────────────────────────────
 resource "aws_iam_role" "bedrock_kb" {
-  name = "${var.project_name}-${var.environment}-kb-role-new"
+  name = "${var.project_name}-${var.environment}-kb-role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Action = "sts:AssumeRole"
-      Effect = "Allow"
+      Effect    = "Allow"
       Principal = { Service = "bedrock.amazonaws.com" }
+      Action    = "sts:AssumeRole"
       Condition = {
-        StringEquals = { "aws:SourceAccount" = data.aws_caller_identity.current.account_id }
-        ArnLike      = { "aws:SourceArn" = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:knowledge-base/*" }
+        StringEquals = {
+          "aws:SourceAccount" = data.aws_caller_identity.current.account_id
+        }
+        ArnLike = {
+          "aws:SourceArn" = "arn:aws:bedrock:${var.aws_region}:${data.aws_caller_identity.current.account_id}:knowledge-base/*"
+        }
       }
     }]
   })
@@ -77,7 +120,11 @@ resource "aws_iam_role_policy" "kb_s3" {
   role = aws_iam_role.bedrock_kb.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{ Effect = "Allow", Action = ["s3:ListBucket", "s3:GetObject"], Resource = [aws_s3_bucket.docs.arn, "${aws_s3_bucket.docs.arn}/*"] }]
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket", "s3:GetObject"]
+      Resource = [aws_s3_bucket.docs.arn, "${aws_s3_bucket.docs.arn}/*"]
+    }]
   })
 }
 
@@ -86,46 +133,61 @@ resource "aws_iam_role_policy" "kb_aoss" {
   role = aws_iam_role.bedrock_kb.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{ Effect = "Allow", Action = ["aoss:APIAccessAll"], Resource = [aws_opensearchserverless_collection.main.arn] }]
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["aoss:APIAccessAll"]
+      Resource = [aws_opensearchserverless_collection.main.arn]
+    }]
   })
 }
 
 resource "aws_iam_role_policy" "kb_model" {
-  name = "model-access"
+  name = "embedding-model"
   role = aws_iam_role.bedrock_kb.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{ Effect = "Allow", Action = ["bedrock:InvokeModel"], Resource = ["arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v1"] }]
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["bedrock:InvokeModel"]
+      Resource = [
+        "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0"
+      ]
+    }]
   })
 }
 
-# Bedrock Knowledge Base
-# First create the index using a local provisioner
+# ── Create OpenSearch Index ────────────────────────────────────────────────
 resource "null_resource" "create_index" {
   depends_on = [
     aws_opensearchserverless_collection.main,
-    aws_opensearchserverless_access_policy.data
+    aws_opensearchserverless_access_policy.data,
   ]
-
   triggers = {
-    collection_endpoint = aws_opensearchserverless_collection.main.collection_endpoint
-    index_name          = "default-index"
+    collection = aws_opensearchserverless_collection.main.collection_endpoint
   }
-
   provisioner "local-exec" {
-    command     = "sleep 30 && pip3 install opensearch-py requests-aws4auth -q && python3 create_index.py ${aws_opensearchserverless_collection.main.collection_endpoint} default-index ${var.aws_region} || (echo 'Index creation failed' && exit 1)"
+    command     = <<-EOT
+      sleep 45
+      pip3 install opensearch-py requests-aws4auth -q
+      python3 create_index.py \
+        ${aws_opensearchserverless_collection.main.collection_endpoint} \
+        bedrock-kb-index \
+        ${var.aws_region} \
+      || echo "Index may already exist, continuing..."
+    EOT
     working_dir = path.module
   }
 }
 
+# ── Bedrock Knowledge Base ─────────────────────────────────────────────────
 resource "aws_bedrockagent_knowledge_base" "main" {
-  name     = "${var.project_name}-${var.environment}-kb-v2"
+  name     = "${var.project_name}-${var.environment}-kb"
   role_arn = aws_iam_role.bedrock_kb.arn
 
   knowledge_base_configuration {
     type = "VECTOR"
     vector_knowledge_base_configuration {
-      embedding_model_arn = "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v1"
+      embedding_model_arn = "arn:aws:bedrock:${var.aws_region}::foundation-model/amazon.titan-embed-text-v2:0"
     }
   }
 
@@ -133,7 +195,7 @@ resource "aws_bedrockagent_knowledge_base" "main" {
     type = "OPENSEARCH_SERVERLESS"
     opensearch_serverless_configuration {
       collection_arn    = aws_opensearchserverless_collection.main.arn
-      vector_index_name = "default-index"
+      vector_index_name = "bedrock-kb-index"
       field_mapping {
         vector_field   = "bedrock-knowledge-base-default-vector"
         text_field     = "AMAZON_BEDROCK_TEXT_CHUNK"
@@ -146,17 +208,23 @@ resource "aws_bedrockagent_knowledge_base" "main" {
     null_resource.create_index,
     aws_opensearchserverless_access_policy.data,
     aws_opensearchserverless_security_policy.net,
-    aws_opensearchserverless_collection.main,
-    aws_iam_role_policy.kb_aoss
+    aws_iam_role_policy.kb_aoss,
   ]
+
+  tags = { Name = "${var.project_name}-${var.environment}-kb" }
 }
 
+# ── KB Data Source — uploads + reference prefixes only ────────────────────
 resource "aws_bedrockagent_data_source" "s3" {
   knowledge_base_id    = aws_bedrockagent_knowledge_base.main.id
   name                 = "${var.project_name}-${var.environment}-s3-ds"
   data_deletion_policy = "RETAIN"
+
   data_source_configuration {
     type = "S3"
-    s3_configuration { bucket_arn = aws_s3_bucket.docs.arn }
+    s3_configuration {
+      bucket_arn         = aws_s3_bucket.docs.arn
+      inclusion_prefixes = ["uploads/", "reference/"]
+    }
   }
 }

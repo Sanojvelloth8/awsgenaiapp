@@ -1,4 +1,3 @@
-# DynamoDB Table for Chat History
 resource "aws_dynamodb_table" "chat" {
   name         = "${var.project_name}-${var.environment}-chat-history"
   billing_mode = "PAY_PER_REQUEST"
@@ -19,8 +18,10 @@ resource "aws_dynamodb_table" "chat" {
     attribute_name = "ttl"
     enabled        = true
   }
-}
 
-output "dynamodb_table_name" {
-  value = aws_dynamodb_table.chat.name
+  point_in_time_recovery {
+    enabled = true
+  }
+
+  tags = { Name = "${var.project_name}-${var.environment}-chat-history" }
 }

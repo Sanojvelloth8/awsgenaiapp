@@ -1,18 +1,19 @@
 terraform {
+  required_version = ">= 1.5, < 2.0"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
   }
-  required_version = ">= 1.0"
 
   backend "s3" {
-    bucket         = "genapp-terraform-state-334143578807"
-    key            = "global/s3/terraform.tfstate"
-    region         = "us-east-1"
-    dynamodb_table = "genapp-terraform-locks"
-    encrypt        = true
+    # Fill these in before first apply:
+    # bucket         = "your-terraform-state-bucket"
+    # key            = "genapp/terraform.tfstate"
+    # region         = "us-east-1"
+    # dynamodb_table = "your-terraform-locks-table"
+    # encrypt        = true
   }
 }
 
