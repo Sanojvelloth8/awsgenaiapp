@@ -1,4 +1,3 @@
-# Cognito User Pools
 resource "aws_cognito_user_pool" "main" {
   name = "${var.project_name}-${var.environment}-users"
 
@@ -18,9 +17,10 @@ resource "aws_cognito_user_pool" "main" {
     required            = true
     mutable             = true
   }
+
+  tags = { Name = "${var.project_name}-${var.environment}-pool" }
 }
 
-# Cognito App Client
 resource "aws_cognito_user_pool_client" "main" {
   name         = "${var.project_name}-${var.environment}-client"
   user_pool_id = aws_cognito_user_pool.main.id
@@ -28,16 +28,17 @@ resource "aws_cognito_user_pool_client" "main" {
   explicit_auth_flows = [
     "ALLOW_USER_PASSWORD_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
-    "ALLOW_USER_SRP_AUTH"
+    "ALLOW_USER_SRP_AUTH",
   ]
 
-  generate_secret = false
-}
+  generate_secret             = false
+  refresh_token_validity      = 30
+  access_token_validity       = 1
+  id_token_validity           = 1
 
-output "cognito_user_pool_id" {
-  value = aws_cognito_user_pool.main.id
-}
-
-output "cognito_client_id" {
-  value = aws_cognito_user_pool_client.main.id
+  token_validity_units {
+    refresh_token = "days"
+    access_token  = "hours"
+    id_token      = "hours"
+  }
 }

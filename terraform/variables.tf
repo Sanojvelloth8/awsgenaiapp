@@ -1,17 +1,17 @@
 variable "aws_region" {
-  description = "AWS Region"
+  description = "AWS region"
   type        = string
   default     = "us-east-1"
 }
 
 variable "project_name" {
-  description = "Project name prefix"
+  description = "Project name prefix for all resources"
   type        = string
   default     = "genapp"
 }
 
 variable "environment" {
-  description = "Environment (dev/prod)"
+  description = "Environment name"
   type        = string
   default     = "dev"
 }
@@ -38,4 +38,34 @@ variable "azs" {
   description = "Availability zones"
   type        = list(string)
   default     = ["us-east-1a", "us-east-1b"]
+}
+
+variable "backend_cpu" {
+  description = "ECS backend task CPU units"
+  type        = number
+  default     = 512
+}
+
+variable "backend_memory" {
+  description = "ECS backend task memory (MB)"
+  type        = number
+  default     = 1024
+}
+
+variable "frontend_cpu" {
+  description = "ECS frontend task CPU units"
+  type        = number
+  default     = 256
+}
+
+variable "frontend_memory" {
+  description = "ECS frontend task memory (MB)"
+  type        = number
+  default     = 1024
+}
+
+variable "github_repo" {
+  description = "GitHub repo owner/name — passed automatically by CI/CD via github.repository. For local apply, passed via git remote."
+  type        = string
+  default     = ""
 }

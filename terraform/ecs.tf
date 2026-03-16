@@ -1,20 +1,26 @@
-# ECR Repositories
+# ── ECR Repositories ──────────────────────────────────────────────────────
 resource "aws_ecr_repository" "backend" {
   name         = "${var.project_name}-${var.environment}-backend"
   force_delete = true
+  image_scanning_configuration { scan_on_push = true }
 }
 
 resource "aws_ecr_repository" "frontend" {
   name         = "${var.project_name}-${var.environment}-frontend"
   force_delete = true
+  image_scanning_configuration { scan_on_push = true }
 }
 
-# ECS Cluster
+# ── ECS Cluster ────────────────────────────────────────────────────────────
 resource "aws_ecs_cluster" "main" {
   name = "${var.project_name}-${var.environment}-cluster"
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
 }
 
-# ALB
+# ── ALB ────────────────────────────────────────────────────────────────────
 resource "aws_lb" "main" {
   name               = "${var.project_name}-${var.environment}-alb"
   internal           = false
@@ -23,16 +29,20 @@ resource "aws_lb" "main" {
   subnets            = aws_subnet.public[*].id
 }
 
-# Target Groups
 resource "aws_lb_target_group" "frontend" {
   name        = "${var.project_name}-${var.environment}-fe-tg"
   port        = 8501
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
+
   health_check {
-    path    = "/"
-    matcher = "200-399"
+    path                = "/_stcore/health"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 10
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
   }
 }
 
@@ -42,17 +52,22 @@ resource "aws_lb_target_group" "backend" {
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
   target_type = "ip"
+
   health_check {
-    path    = "/"
-    matcher = "200-404"
+    path                = "/"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 10
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
   }
 }
 
-# Listeners
-resource "aws_lb_listener" "main" {
+resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
   port              = 80
   protocol          = "HTTP"
+
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.frontend.arn
@@ -60,84 +75,122 @@ resource "aws_lb_listener" "main" {
 }
 
 resource "aws_lb_listener_rule" "api" {
-  listener_arn = aws_lb_listener.main.arn
+  listener_arn = aws_lb_listener.http.arn
   priority     = 100
+
   action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.backend.arn
   }
+
   condition {
-    path_pattern { values = ["/api/*", "/docs", "/openapi.json"] }
+    path_pattern {
+      values = ["/api/*", "/docs", "/openapi.json"]
+    }
   }
 }
 
-# Task Definitions
+# ── CloudWatch Log Groups ──────────────────────────────────────────────────
+resource "aws_cloudwatch_log_group" "backend" {
+  name              = "/ecs/${var.project_name}-${var.environment}-backend"
+  retention_in_days = 14
+}
+
+resource "aws_cloudwatch_log_group" "frontend" {
+  name              = "/ecs/${var.project_name}-${var.environment}-frontend"
+  retention_in_days = 14
+}
+
+# ── Backend Task Definition ────────────────────────────────────────────────
 resource "aws_ecs_task_definition" "backend" {
   family                   = "${var.project_name}-${var.environment}-backend"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = var.backend_cpu
+  memory                   = var.backend_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
 
   container_definitions = jsonencode([{
-    name  = "backend"
-    image = "${aws_ecr_repository.backend.repository_url}:latest"
-    portMappings = [{ containerPort = 8000, hostPort = 8000 }]
+    name      = "backend"
+    image     = "${aws_ecr_repository.backend.repository_url}:latest"
+    essential = true
+
+    portMappings = [{
+      containerPort = 8000
+      hostPort      = 8000
+      protocol      = "tcp"
+    }]
+
     environment = [
-      { name = "AWS_REGION", value = var.aws_region },
-      { name = "DYNAMODB_TABLE", value = aws_dynamodb_table.chat.name },
-      { name = "KB_ID", value = aws_bedrockagent_knowledge_base.main.id },
-      { name = "KB_BUCKET_NAME", value = aws_s3_bucket.docs.id },
-      { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id },
-      { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.main.id }
+      { name = "AWS_REGION",            value = var.aws_region },
+      { name = "DYNAMODB_TABLE",        value = aws_dynamodb_table.chat.name },
+      { name = "KB_ID",                 value = aws_bedrockagent_knowledge_base.main.id },
+      { name = "KB_BUCKET_NAME",        value = aws_s3_bucket.docs.id },
+      { name = "COGNITO_USER_POOL_ID",  value = aws_cognito_user_pool.main.id },
+      { name = "COGNITO_CLIENT_ID",     value = aws_cognito_user_pool_client.main.id },
+      { name = "ALLOWED_ORIGINS",       value = "http://${aws_lb.main.dns_name}" },
     ]
+
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        "awslogs-group"         = "/ecs/${var.project_name}-${var.environment}-backend"
+        "awslogs-group"         = aws_cloudwatch_log_group.backend.name
         "awslogs-region"        = var.aws_region
         "awslogs-stream-prefix" = "ecs"
-        "awslogs-create-group"  = "true"
       }
+    }
+
+    healthCheck = {
+      command     = ["CMD-SHELL", "curl -f http://localhost:8000/ || exit 1"]
+      interval    = 30
+      timeout     = 10
+      retries     = 3
+      startPeriod = 60
     }
   }])
 }
 
+# ── Frontend Task Definition ───────────────────────────────────────────────
 resource "aws_ecs_task_definition" "frontend" {
   family                   = "${var.project_name}-${var.environment}-frontend"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = 256
-  memory                   = 512
+  cpu                      = var.frontend_cpu
+  memory                   = var.frontend_memory
   execution_role_arn       = aws_iam_role.execution.arn
   task_role_arn            = aws_iam_role.task.arn
 
   container_definitions = jsonencode([{
-    name  = "frontend"
-    image = "${aws_ecr_repository.frontend.repository_url}:latest"
-    portMappings = [{ containerPort = 8501, hostPort = 8501 }]
+    name      = "frontend"
+    image     = "${aws_ecr_repository.frontend.repository_url}:latest"
+    essential = true
+
+    portMappings = [{
+      containerPort = 8501
+      hostPort      = 8501
+      protocol      = "tcp"
+    }]
+
     environment = [
-      { name = "BACKEND_URL", value = "http://${aws_lb.main.dns_name}" },
-      { name = "COGNITO_USER_POOL_ID", value = aws_cognito_user_pool.main.id },
-      { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.main.id },
-      { name = "DYNAMODB_TABLE", value = aws_dynamodb_table.chat.name },
-      { name = "AWS_REGION", value = var.aws_region }
+      { name = "BACKEND_URL",           value = "http://${aws_lb.main.dns_name}" },
+      { name = "COGNITO_USER_POOL_ID",  value = aws_cognito_user_pool.main.id },
+      { name = "COGNITO_CLIENT_ID",     value = aws_cognito_user_pool_client.main.id },
+      { name = "AWS_REGION",            value = var.aws_region },
     ]
+
     logConfiguration = {
       logDriver = "awslogs"
       options = {
-        "awslogs-group"         = "/ecs/${var.project_name}-${var.environment}-frontend"
+        "awslogs-group"         = aws_cloudwatch_log_group.frontend.name
         "awslogs-region"        = var.aws_region
         "awslogs-stream-prefix" = "ecs"
-        "awslogs-create-group"  = "true"
       }
     }
   }])
 }
 
-# ECS Services
+# ── ECS Services ───────────────────────────────────────────────────────────
 resource "aws_ecs_service" "backend" {
   name            = "${var.project_name}-${var.environment}-backend"
   cluster         = aws_ecs_cluster.main.id
@@ -155,6 +208,12 @@ resource "aws_ecs_service" "backend" {
     target_group_arn = aws_lb_target_group.backend.arn
     container_name   = "backend"
     container_port   = 8000
+  }
+
+  depends_on = [aws_lb_listener_rule.api]
+
+  lifecycle {
+    ignore_changes = [task_definition]
   }
 }
 
@@ -175,5 +234,11 @@ resource "aws_ecs_service" "frontend" {
     target_group_arn = aws_lb_target_group.frontend.arn
     container_name   = "frontend"
     container_port   = 8501
+  }
+
+  depends_on = [aws_lb_listener.http]
+
+  lifecycle {
+    ignore_changes = [task_definition]
   }
 }
